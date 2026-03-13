@@ -24,7 +24,7 @@ color_pal = sns.color_palette()
 def get_data_from_exchange(symbol='BTC/USD',timeframe='1d'):
     exchange = ccxt.bitfinex()
     limit = 3500
-    symbol = input("Specify cryptocurrency (e.g BTC/USD , ETH/USDT) or use default (BTC/USD): ")
+    # symbol = input("Specify cryptocurrency (e.g BTC/USD , ETH/USD) or use default (BTC/USD): ")
     if not symbol:
         symbol = 'BTC/USD'
 
@@ -32,7 +32,7 @@ def get_data_from_exchange(symbol='BTC/USD',timeframe='1d'):
 
     print(f"Obtaining data from exchange: ")
     for i in tqdm(range(30)):
-        start_timestamp = exchange.parse8601('2014-01-01T00:00:00Z')
+        start_timestamp = exchange.parse8601('2015-01-01T00:00:00Z')
         if i > 0:
             start_timestamp = data[-1][0] + 1  
         page_data = exchange.fetch_ohlcv(symbol=symbol, timeframe=timeframe, limit=limit, since=start_timestamp)
@@ -43,5 +43,6 @@ def to_pands_df(data)->pd.core.frame.DataFrame:
     df = pd.DataFrame(data, columns=['DateTime', 'Open', 'High', 'Low', 'Close', 'Volume'])
     df['DateTime'] = pd.to_datetime(df['DateTime'], unit = 'ms')
     df.set_index('DateTime', inplace=True)
+    df.to_csv('data.csv',sep=';')
     return df
 

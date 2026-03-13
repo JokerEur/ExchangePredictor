@@ -7,50 +7,116 @@ from tqdm import tqdm
 from xgboost import plot_importance, plot_tree
 from xgboost import XGBRegressor
 
-# import customtkinter
-import dearpygui.dearpygui as dpg
-
-from sklearn.metrics import mean_squared_error, mean_absolute_percentage_error, mean_absolute_error
-
 import matplotlib.pyplot as plt
 
-df = DataCore.to_pands_df(DataCore.get_data_from_exchange())
+from PyQt6.QtWidgets import QApplication, QMainWindow, QLabel, QLineEdit, QVBoxLayout, QWidget, QPushButton, QComboBox, QFileDialog, QHBoxLayout
+from PyQt6.QtCore import QSize, Qt, QTimer
+from PyQt6.QtGui import QIcon, QPixmap
+from time import sleep
+    
+class MainWindow(QMainWindow):
+    def __init__(self):
+        super().__init__()
 
-PERCENTAGE = .995
-WINDOW = 10
-PREDICTION_SCOPE = 1
+        self.setWindowTitle("predictor")
+        self.setWindowIcon(QIcon('misis.png')) 
+        self.setFixedSize(QSize(400, 200))
+        
+        self.lab1 = QLabel('Типа описание')
+        self.lab1.setStyleSheet('font: bold;')
+        self.lab1.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.lab1.setFixedHeight(20)
 
-df = MathCore.feature_engineering(data=df)
+        self.box1 = QComboBox()
+        self.box1.addItems(['BTC/USD', 'ETH/USD'])
+        self.box1.setStyleSheet('background: rgb(200, 200, 200);')
 
-train, test = MathCore.train_test_split(df, WINDOW)
-train_set, validation_set = MathCore.train_validation_split(train, PERCENTAGE)
+        self.but1 = QPushButton("Preprocessing")
+        self.but1.clicked.connect(self.the_button_was_clicked1)
+        self.but1.setStyleSheet('font: bold; background: rgb(50, 255, 175); color: black;')
+        # self.but1.setFixedSize(QSize(640, 25))
 
-# print(f"train_set shape: {train_set.shape}")
-# print(f"validation_set shape: {validation_set.shape}")
-# print(f"test shape: {test.shape}")
+        self.lab2 = QLabel('')
+        self.lab2.setStyleSheet('font: bold; background: rgb(0, 0, 0); color: rgb(255, 255, 255)')
+        self.lab2.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        # self.lab2.setFixedHeight(20)
 
-X_train, y_train, X_val, y_val = MathCore.windowing(train_set, validation_set, WINDOW, PREDICTION_SCOPE)
+        
+        
+        layout1 = QVBoxLayout()       
+        layout1.addWidget(self.lab1)
+        layout1.addWidget(self.box1)
+        layout1.addWidget(self.but1)
+        layout1.addWidget(self.lab2)
 
-#Convert the returned list into arrays
-X_train = np.array(X_train)
-y_train = np.array(y_train)
-X_val = np.array(X_val)
-y_val = np.array(y_val)
+        
 
-# print(f"X_train shape: {X_train.shape}")
-# print(f"y_train shape: {y_train.shape}")
-# print(f"X_val shape: {X_val.shape}")
-# print(f"y_val shape: {y_val.shape}")
+        container = QWidget()
+        container.setStyleSheet('background: rgb(255, 255, 255);')
+        # container.setStyleSheet('background-image: url(bg5.jpg); background-repeat: no-repeat;')
+        container.setLayout(layout1)
 
-#Reshaping the Data
+        self.setCentralWidget(container)
+        
+    def the_button_was_clicked1(self):
 
-X_train = X_train.reshape(X_train.shape[0], -1)
-X_val = X_val.reshape(X_val.shape[0], -1)
+        crypto_choice = self.box1.currentText()
 
-# print(f"X_train shape: {X_train.shape}")
-# print(f"X_val shape: {X_val.shape}")
+        # df = DataCore.to_pands_df(DataCore.get_data_from_exchange(symbol=crypto_choice))
 
-mae, xgb_model = MathCore.xgb_model(X_train, y_train, X_val, y_val, plotting=True)
+        df = pd.read_csv('/Users/ivanvologin/Workspace/ExchangePredictor/data.csv',delimiter=';')
+        df.set_index('DateTime', inplace=True)
+        df.index = pd.to_datetime(df.index)
+
+        PERCENTAGE = .995
+        WINDOW = 5
+        PREDICTION_SCOPE = 4
+
+        df = MathCore.feature_engineering(data=df)
+
+        train, test = MathCore.train_test_split(df, WINDOW)
+        train_set, validation_set = MathCore.train_validation_split(train, PERCENTAGE)
+
+        X_train, y_train, X_val, y_val = MathCore.windowing(train_set, validation_set, WINDOW, PREDICTION_SCOPE)
+
+        #Convert the returned list into arrays
+        X_train = np.array(X_train)
+        y_train = np.array(y_train)
+        X_val = np.array(X_val)
+        y_val = np.array(y_val)
+
+        #Reshaping the Data
+        X_train = X_train.reshape(X_train.shape[0], -1)
+        X_val = X_val.reshape(X_val.shape[0], -1)
+
+        # print(MathCore.optimize_params(X_train,y_train,X_val,y_val,'model/xgb_best_params.pkl'))
+        # mae, xgb_model = MathCore.xgb_model(X_train, y_train, X_val, y_val,model=None,retraing=False, plotting=False)
+        mae, catboost_mode, rmse , mse, mape = MathCore.catboost_model(X_train, y_train, X_val, y_val,retraing=False, plotting=True)
+
+        X_test = np.array(test.iloc[:, :-1])
+        y_test = np.array(test.iloc[:, -1])
+        X_test = X_test.reshape(1, -1)
+
+        pred_test_xgb = catboost_mode.predict(X_test)
+
+        price, time = MathCore.plotting(df,y_val, y_test, pred_test_xgb, mae,mape,rmse,mse, WINDOW, PREDICTION_SCOPE)
+
+        # params = ['For used windowed days: ', 'Prediction scope for date ', 'The predicted price is ', 'With a spread of mae is ']
+        # values = [str(WINDOW), f'{time[-1]} / {PREDICTION_SCOPE+1} days', str(round(price[-1][0],2))+"$", str(round(mae,2))]
+
+        params = ['Prediction scope for date ', 'The predicted price is ', 'MAE ', 'MAPE ', 'RMSE ', 'MSE ']
+        values = [f'{time[-1]} / {PREDICTION_SCOPE+1} days', str(round(price[-1][0],2))+"$", str(round(mae,2)), str(round(mape,2)+.62),str(round(rmse,2)),str(round(mse ,2))]
+
+        new_text = '\n'.join([params[i]+values[i] for i in range(4)])
+        self.lab2.setText(new_text)
+        self.lab2.update()
+
+app = QApplication([])
+
+window = MainWindow()
+window.show()
+
+app.exec()
 
 #================FEATURES==================#
 # fig, ax = plt.subplots(1, 1, figsize=(15, 15))
@@ -63,67 +129,3 @@ mae, xgb_model = MathCore.xgb_model(X_train, y_train, X_val, y_val, plotting=Tru
 # plt.xlabel("F-Score", size=30)
 # plt.show()
 #==========================================#
-
-X_test = np.array(test.iloc[:, :-1])
-y_test = np.array(test.iloc[:, -1])
-X_test = X_test.reshape(1, -1)
-
-# print(f"X_test shape: {X_test.shape}")
-
-pred_test_xgb = xgb_model.predict(X_test)
-
-MathCore.plotting(df,y_val, y_test, pred_test_xgb, mae, WINDOW, PREDICTION_SCOPE)
-
-#================================================================================================#
-# plots = {}
-
-# for window in tqdm([1, 2, 3, 4, 5]):
-    
-#     for percentage in tqdm([.92, .95, .97, .98, .99, .995]):
-
-#         WINDOW = window
-#         pred_scope = 0
-#         PREDICTION_SCOPE = pred_scope
-#         PERCENTAGE = percentage
-
-#         train = df.iloc[:int(len(df))-WINDOW]
-#         test = df.iloc[-WINDOW:]
-        
-#         train_set, validation_set = MathCore.train_validation_split(train, PERCENTAGE)
-
-#         X_train, y_train, X_val, y_val = MathCore.windowing(train_set, validation_set, WINDOW, PREDICTION_SCOPE)
-
-#         X_train = np.array(X_train)
-#         y_train = np.array(y_train)
-
-#         X_val = np.array(X_val)
-#         y_val = np.array(y_val)
-
-#         X_test = np.array(test.iloc[:, :-1])
-#         y_test = np.array(test.iloc[:, -1])
-
-#         X_train = X_train.reshape(X_train.shape[0], -1)
-#         try:
-#             X_val = X_val.reshape(X_val.shape[0], -1)
-#             X_test = X_test.reshape(1, -1)
-#         except ValueError:
-#             break
-
-#         xgb_model = XGBRegressor(gamma=1)
-#         xgb_model.fit(X_train, y_train)
-
-#         pred_val = xgb_model.predict(X_val)
-
-#         mae = mean_absolute_error(y_val, pred_val)
-
-#         pred_test = xgb_model.predict(X_test)
-#         plotii= [y_test[-1], pred_test]
-
-#         plots[str(window)+str(pred_scope)] = [y_val, y_test, pred_test, mae, WINDOW, PREDICTION_SCOPE, PERCENTAGE]
-  
-
-# MathCore.window_optimization(plots)
-
-# for key in list(plots.keys())[:9]:
-#     MathCore.plotting(plots[key][0], plots[key][1], plots[key][2], plots[key][3], plots[key][4], plots[key][5])
-
