@@ -1,0 +1,2 @@
+"""Shared primitives and configuration."""
+

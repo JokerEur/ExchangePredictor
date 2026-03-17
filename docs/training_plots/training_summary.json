@@ -1,0 +1,58 @@
+{
+  "source_used_for_plots": "exchange",
+  "dataset_rows_after_fe": 389,
+  "feature_count": 155,
+  "split": {
+    "train_rows": 311,
+    "validation_rows": 78,
+    "validation_fraction": 0.2
+  },
+  "metadata_metrics": {
+    "xgboost": {
+      "mae": 21.42326391523312,
+      "mape": 0.23863545044936219,
+      "rmse": 25.751896839828813,
+      "mse": 663.1601908491851
+    },
+    "random_forest": {
+      "mae": 19.75960785598256,
+      "mape": 0.22634324809231415,
+      "rmse": 25.42967817412722,
+      "mse": 646.6685320396823
+    }
+  },
+  "metadata_best_params": {
+    "xgboost": {
+      "subsample": 1.0,
+      "reg_lambda": 1.0,
+      "reg_alpha": 0.1,
+      "objective": "reg:pseudohubererror",
+      "n_estimators": 850,
+      "min_child_weight": 7,
+      "max_depth": 5,
+      "learning_rate": 0.05,
+      "huber_slope": 156.96,
+      "gamma": 0.0,
+      "colsample_bytree": 0.85
+    },
+    "random_forest": {
+      "n_estimators": 900,
+      "min_samples_split": 6,
+      "min_samples_leaf": 3,
+      "max_features": 1.0,
+      "max_depth": 8
+    }
+  },
+  "validation_replay_metrics": {
+    "xgboost": {
+      "mae": 0.3255158738356381,
+      "rmse": 0.8461056335727553,
+      "mse": 0.7158947431635535
+    },
+    "random_forest": {
+      "mae": 1.5190566092521407,
+      "rmse": 2.169975340086953,
+      "mse": 4.708792976585487
+    }
+  }
+}
