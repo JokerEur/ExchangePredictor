@@ -1,13 +1,42 @@
 {
-  "source_used_for_plots": "exchange",
-  "dataset_rows_after_fe": 389,
-  "feature_count": 155,
+  "dataset_rows_after_fe": 2995,
+  "feature_count": 153,
   "split": {
-    "train_rows": 311,
-    "validation_rows": 78,
+    "train_rows": 2396,
+    "validation_rows": 599,
     "validation_fraction": 0.2
   },
-  "metadata_metrics": {
+  "diagnostic_best_params": {
+    "xgboost": {
+      "learning_rate": 0.05,
+      "max_depth": 3,
+      "n_estimators": 500,
+      "subsample": 0.8,
+      "colsample_bytree": 0.8
+    },
+    "random_forest": {
+      "n_estimators": 300,
+      "max_depth": 12,
+      "min_samples_split": 2,
+      "min_samples_leaf": 1,
+      "max_features": "sqrt"
+    }
+  },
+  "diagnostic_validation_metrics": {
+    "xgboost": {
+      "mae": 2795.730695896561,
+      "mape": 0.10672254593181826,
+      "rmse": 3425.121926810428,
+      "mse": 11731460.213517578
+    },
+    "random_forest": {
+      "mae": 2783.044988310211,
+      "mape": 0.1063449848993819,
+      "rmse": 3256.0383408483426,
+      "mse": 10601785.677074427
+    }
+  },
+  "metadata_trained_models_metrics_sol_h1": {
     "xgboost": {
       "mae": 21.42326391523312,
       "mape": 0.23863545044936219,
@@ -19,40 +48,6 @@
       "mape": 0.22634324809231415,
       "rmse": 25.42967817412722,
       "mse": 646.6685320396823
-    }
-  },
-  "metadata_best_params": {
-    "xgboost": {
-      "subsample": 1.0,
-      "reg_lambda": 1.0,
-      "reg_alpha": 0.1,
-      "objective": "reg:pseudohubererror",
-      "n_estimators": 850,
-      "min_child_weight": 7,
-      "max_depth": 5,
-      "learning_rate": 0.05,
-      "huber_slope": 156.96,
-      "gamma": 0.0,
-      "colsample_bytree": 0.85
-    },
-    "random_forest": {
-      "n_estimators": 900,
-      "min_samples_split": 6,
-      "min_samples_leaf": 3,
-      "max_features": 1.0,
-      "max_depth": 8
-    }
-  },
-  "validation_replay_metrics": {
-    "xgboost": {
-      "mae": 0.3255158738356381,
-      "rmse": 0.8461056335727553,
-      "mse": 0.7158947431635535
-    },
-    "random_forest": {
-      "mae": 1.5190566092521407,
-      "rmse": 2.169975340086953,
-      "mse": 4.708792976585487
     }
   }
 }

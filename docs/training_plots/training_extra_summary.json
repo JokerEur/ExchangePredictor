@@ -1,0 +1,7 @@
+{
+  "best_learning_rate": 0.05,
+  "best_max_depth": 3,
+  "best_heatmap_mae": 6324.250521493021,
+  "diagnostic_validation_mae": 2795.730695896561,
+  "diagnostic_validation_rmse": 3425.121926810428
+}
