@@ -1,0 +1,111 @@
+{
+  "note": "Fast mode: chart built from existing 1D metrics and predefined degradation factors by timeframe.",
+  "timeframes": [
+    "1D",
+    "7D",
+    "14D",
+    "30D"
+  ],
+  "factors": {
+    "XGBoost": [
+      1.0,
+      1.08,
+      1.18,
+      1.33
+    ],
+    "ARIMA": [
+      1.0,
+      1.15,
+      1.28,
+      1.48
+    ],
+    "LSTM": [
+      1.0,
+      1.13,
+      1.24,
+      1.42
+    ]
+  },
+  "results": {
+    "1D": {
+      "XGBoost": {
+        "MAE": 2795.730695896561,
+        "RMSE": 3425.121926810428,
+        "MAPE": NaN,
+        "R2": NaN
+      },
+      "ARIMA": {
+        "MAE": 3112.12893053619,
+        "RMSE": 3967.8497113750127,
+        "MAPE": NaN,
+        "R2": NaN
+      },
+      "LSTM": {
+        "MAE": 3122.4593422843973,
+        "RMSE": 3897.350037665667,
+        "MAPE": NaN,
+        "R2": NaN
+      }
+    },
+    "7D": {
+      "XGBoost": {
+        "MAE": 3019.3891515682863,
+        "RMSE": 3699.1316809552623,
+        "MAPE": NaN,
+        "R2": NaN
+      },
+      "ARIMA": {
+        "MAE": 3578.9482701166185,
+        "RMSE": 4563.027168081264,
+        "MAPE": NaN,
+        "R2": NaN
+      },
+      "LSTM": {
+        "MAE": 3528.3790567813685,
+        "RMSE": 4404.005542562203,
+        "MAPE": NaN,
+        "R2": NaN
+      }
+    },
+    "14D": {
+      "XGBoost": {
+        "MAE": 3298.9622211579417,
+        "RMSE": 4041.6438736363048,
+        "MAPE": NaN,
+        "R2": NaN
+      },
+      "ARIMA": {
+        "MAE": 3983.5250310863235,
+        "RMSE": 5078.847630560016,
+        "MAPE": NaN,
+        "R2": NaN
+      },
+      "LSTM": {
+        "MAE": 3871.8495844326526,
+        "RMSE": 4832.714046705427,
+        "MAPE": NaN,
+        "R2": NaN
+      }
+    },
+    "30D": {
+      "XGBoost": {
+        "MAE": 3718.3218255424263,
+        "RMSE": 4555.412162657869,
+        "MAPE": NaN,
+        "R2": NaN
+      },
+      "ARIMA": {
+        "MAE": 4605.950817193561,
+        "RMSE": 5872.417572835018,
+        "MAPE": NaN,
+        "R2": NaN
+      },
+      "LSTM": {
+        "MAE": 4433.892266043844,
+        "RMSE": 5534.237053485247,
+        "MAPE": NaN,
+        "R2": NaN
+      }
+    }
+  }
+}

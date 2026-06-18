@@ -11,7 +11,6 @@ from typing import Any, Optional
 import numpy as np
 import pandas as pd
 from sklearn.base import clone
-from sklearn.ensemble import RandomForestRegressor
 from sklearn.metrics import (
     make_scorer,
     mean_absolute_error,
@@ -29,11 +28,13 @@ from .data_provider import DataProvider
 from .features import build_feature_frame
 from .model_params import load_model_params
 from .model_store import ModelStore, StoredModel
+from .models import ARIMAWrapper, LSTMWrapper
 from .schemas import (
     Candle,
     DataWindow,
     DailyForecastPoint,
     DataSourceRequest,
+    EnsembleWeights,
     FeatureDescriptor,
     FeatureHistoryPoint,
     FeaturePreviewRequest,
@@ -55,9 +56,10 @@ UNIT_TO_SECONDS = {"m": 60, "h": 60 * 60, "d": 60 * 60 * 24, "w": 60 * 60 * 24 *
 MAX_FORECAST_DAYS = 30
 XGBOOST_HUBER_MODE_VERSION = "scaled_target_median_v1"
 ESTIMATOR_REGISTRY = {
-    "random_forest": RandomForestRegressor,
     "xgboost": XGBRegressor,
 }
+SUPPORTED_MODEL_TYPES = ("xgboost", "arima", "lstm")
+ENSEMBLE_COMPONENTS = ("xgboost", "arima", "lstm")
 LOGGER = logging.getLogger(__name__)
 
 
@@ -295,6 +297,7 @@ class PredictionService:
                     validation_fraction=request.validation_fraction,
                     exchange_limit=request.exchange_limit,
                     data_path=request.data_path,
+                    ensemble_weights=request.ensemble_weights,
                 )
                 outcome = self._run_training(auto_train_request)
                 self._model_store.save(
@@ -337,18 +340,44 @@ class PredictionService:
             supported_symbols = [legacy_symbol] if legacy_symbol else [prepared.primary_symbol]
         supported_symbols = [str(symbol).upper() for symbol in supported_symbols]
 
+        is_ensemble = bool(model_bundle.get("is_ensemble", False))
+        active_model_type = str(metadata.get("model_type", request.auto_model_type)).strip().lower()
+        active_ensemble_weights: Optional[dict[str, float]] = None
+        if is_ensemble:
+            stored_weights = dict(model_bundle.get("ensemble_weights", {}))
+            if request.ensemble_weights is not None:
+                active_ensemble_weights = _normalize_weights(request.ensemble_weights.as_dict())
+            else:
+                active_ensemble_weights = stored_weights or {"xgboost": 0.5, "arima": 0.25, "lstm": 0.25}
+
         forecast_path: list[DailyForecastPoint] = []
         for day_ahead in range(1, prepared.forecast_days + 1):
             scope = prepared.day_scope_map[day_ahead]
-            model = self._get_model_for_scope(model_bundle, scope)
-            latest_vector = self._build_latest_feature_vector(
-                prepared=prepared,
-                symbol=prepared.primary_symbol,
-                prediction_scope=scope,
-                supported_symbols=supported_symbols,
-                feature_columns=feature_columns,
-            )
-            predicted_price = float(model.predict(latest_vector)[0])
+
+            if is_ensemble:
+                predicted_price = self._predict_ensemble_for_scope(
+                    model_bundle=model_bundle,
+                    scope=scope,
+                    prepared=prepared,
+                    supported_symbols=supported_symbols,
+                    feature_columns=feature_columns,
+                    weights=active_ensemble_weights or {},
+                )
+            else:
+                model = self._get_model_for_scope(model_bundle, scope)
+                if active_model_type == "arima":
+                    close_prices = prepared.ohlcv_map[prepared.primary_symbol]["close"].to_numpy(dtype=float)
+                    predicted_price = float(model.predict_scope(close_prices, scope))
+                else:
+                    latest_vector = self._build_latest_feature_vector(
+                        prepared=prepared,
+                        symbol=prepared.primary_symbol,
+                        prediction_scope=scope,
+                        supported_symbols=supported_symbols,
+                        feature_columns=feature_columns,
+                    )
+                    predicted_price = float(model.predict(latest_vector)[0])
+
             predict_for_at = (
                 prepared.ohlcv_map[prepared.primary_symbol].index[-1].to_pydatetime()
                 + _timeframe_to_timedelta(prepared.timeframe, scope + 1)
@@ -428,6 +457,7 @@ class PredictionService:
             ),
             loss_function=display_loss_function,
             tuning_scoring=display_tuning_scoring,
+            ensemble_weights=active_ensemble_weights,
             request_data_windows=prepared.data_windows,
             request_data_is_fresh=prepared.data_is_fresh,
             request_max_data_lag_minutes=prepared.max_data_lag_minutes,
@@ -487,6 +517,10 @@ class PredictionService:
             tune = False
 
         candidate_types = self._resolve_candidate_types(request, existing_metadata)
+
+        if "ensemble" in candidate_types:
+            return self._run_ensemble_training(request, prepared)
+
         best_result: Optional[dict[str, Any]] = None
 
         max_day = prepared.forecast_days
@@ -630,6 +664,461 @@ class PredictionService:
 
         return TrainOutcome(model=model_bundle, metadata=metadata, response=response)
 
+    # ------------------------------------------------------------------
+    # Ансамблевое обучение
+    # ------------------------------------------------------------------
+
+    def _run_ensemble_training(self, request: TrainRequest, prepared: PreparedDataset) -> TrainOutcome:
+        """
+        Обучает ансамбль XGBoost + ARIMA + LSTM для каждого scope.
+
+        Веса компонентов:
+        - Если переданы в request.ensemble_weights — используются они.
+        - Если включено auto_weighting в конфиге — вычисляются по inverse-MAE
+          на валидационном наборе.
+        - Иначе — берутся дефолтные веса из конфига.
+        """
+        LOGGER.info(
+            "Stage: ensemble_training | model_id=%s | mode=%s",
+            request.model_id,
+            request.mode,
+        )
+
+        tuning_scoring = _normalize_scoring_name(
+            self._model_params.get("tuning", {}).get("scoring", "mae")
+        )
+        tuning_scoring_label = _display_scoring_name(tuning_scoring)
+
+        max_scope = max(prepared.day_scope_map.values())
+        unique_scopes = sorted(set(prepared.day_scope_map.values()))
+        max_scope_matrices = self._build_scope_matrices(prepared, max_scope)
+        feature_columns = max_scope_matrices.feature_columns
+
+        # Гиперпараметры XGBoost: тюним один раз на max_scope
+        tune = request.tune
+        if request.mode == "retrain":
+            tune = False
+        xgb_result_max = self._fit_and_evaluate(
+            model_type="xgboost",
+            scope_matrices=max_scope_matrices,
+            tune=tune,
+            tune_trials=request.tune_trials,
+            full_refit=False,  # Для валидации не делаем refit — нужен validation_model
+            base_params=None,
+            scoring=tuning_scoring,
+            forecast_days=prepared.forecast_days,
+        )
+        best_xgb_params = xgb_result_max["best_params"]
+        LOGGER.info(
+            "Stage: ensemble_xgb_tuned | model_id=%s | selection_loss=%.6f",
+            request.model_id,
+            xgb_result_max["selection_loss"],
+        )
+
+        # ARIMA: обучаем один раз на training-части ряда цен первичного символа
+        primary_symbol = prepared.primary_symbol
+        close_prices = prepared.ohlcv_map[primary_symbol]["close"].to_numpy(dtype=float)
+        max_split_idx = int(len(close_prices) * (1.0 - prepared.validation_fraction))
+        arima_train_prices = close_prices[:max_split_idx]
+        arima_config = self._model_params.get("models", {}).get("arima", {})
+        arima_order = tuple(arima_config.get("default_params", {}).get("order", [5, 1, 0]))
+        arima_wrapper = ARIMAWrapper(order=arima_order)  # type: ignore[arg-type]
+        LOGGER.info("Stage: ensemble_arima_fit | model_id=%s", request.model_id)
+        arima_wrapper.fit(arima_train_prices)
+
+        # LSTM-параметры из конфига
+        lstm_config = self._model_params.get("models", {}).get("lstm", {}).get("default_params", {})
+
+        # Обучаем компоненты для каждого scope
+        ensemble_models_by_scope: dict[str, dict[str, Any]] = {}
+        metrics_by_scope: dict[str, dict[str, float]] = {}
+        val_metrics_by_component: dict[str, list[float]] = {c: [] for c in ENSEMBLE_COMPONENTS}
+        train_rows = 0
+        validation_rows = 0
+
+        for scope in unique_scopes:
+            LOGGER.info(
+                "Stage: ensemble_fit_scope | model_id=%s | scope=%s",
+                request.model_id,
+                scope,
+            )
+            scope_matrices = (
+                max_scope_matrices if scope == max_scope
+                else self._build_scope_matrices(prepared, scope)
+            )
+
+            # XGBoost для данного scope (без тюнинга, с лучшими параметрами)
+            xgb_scope = self._fit_and_evaluate(
+                model_type="xgboost",
+                scope_matrices=scope_matrices,
+                tune=False,
+                tune_trials=1,
+                full_refit=False,  # validation model
+                base_params=best_xgb_params,
+                scoring=tuning_scoring,
+                forecast_days=prepared.forecast_days,
+            )
+            xgb_val_preds = xgb_scope["val_predictions"]
+
+            # LSTM для данного scope
+            lstm_scope = self._fit_and_evaluate_lstm(
+                scope_matrices=scope_matrices,
+                lstm_config=lstm_config,
+                full_refit=False,
+            )
+            lstm_val_preds = lstm_scope["val_predictions"]
+
+            # ARIMA validation predictions: forecast scope+1 шагов от конца train
+            n_val = len(scope_matrices.y_validation)
+            arima_val_preds = self._arima_validation_predictions(
+                arima_wrapper=arima_wrapper,
+                close_prices=close_prices,
+                split_idx=max_split_idx,
+                scope=scope,
+                n_val=n_val,
+            )
+
+            # Накапливаем MAE по компонентам (для авто-взвешивания)
+            val_metrics_by_component["xgboost"].append(
+                float(mean_absolute_error(scope_matrices.y_validation, xgb_val_preds))
+            )
+            val_metrics_by_component["arima"].append(
+                float(mean_absolute_error(scope_matrices.y_validation, arima_val_preds))
+            )
+            val_metrics_by_component["lstm"].append(
+                float(mean_absolute_error(scope_matrices.y_validation, lstm_val_preds))
+            )
+
+            # Предварительные веса (уточним после цикла)
+            preliminary_weights = self._resolve_ensemble_weights(request, val_metrics_by_component)
+            ensemble_val_preds = _weighted_average(
+                predictions={
+                    "xgboost": xgb_val_preds,
+                    "arima": arima_val_preds,
+                    "lstm": lstm_val_preds,
+                },
+                weights=preliminary_weights,
+            )
+            ensemble_metrics = _calculate_metrics(scope_matrices.y_validation, ensemble_val_preds)
+
+            # Финальный refit для хранения (если запрошен)
+            if request.full_refit:
+                xgb_final = self._fit_and_evaluate(
+                    model_type="xgboost",
+                    scope_matrices=scope_matrices,
+                    tune=False,
+                    tune_trials=1,
+                    full_refit=True,
+                    base_params=best_xgb_params,
+                    scoring=tuning_scoring,
+                    forecast_days=prepared.forecast_days,
+                )["model"]
+                lstm_final = self._fit_and_evaluate_lstm(
+                    scope_matrices=scope_matrices,
+                    lstm_config=lstm_config,
+                    full_refit=True,
+                )["model"]
+            else:
+                xgb_final = xgb_scope["model"]
+                lstm_final = lstm_scope["model"]
+
+            ensemble_models_by_scope[str(scope)] = {
+                "xgboost": xgb_final,
+                "lstm": lstm_final,
+            }
+            metrics_by_scope[str(scope)] = ensemble_metrics.model_dump()
+            train_rows = len(scope_matrices.x_train)
+            validation_rows = len(scope_matrices.y_validation)
+
+        # Итоговые веса на основе средних MAE по всем scope
+        final_weights = self._resolve_ensemble_weights(request, val_metrics_by_component)
+
+        trained_at = datetime.now(timezone.utc)
+        model_bundle: dict[str, Any] = {
+            "bundle_version": 2,
+            "is_ensemble": True,
+            "ensemble_weights": final_weights,
+            "arima_wrapper": arima_wrapper,
+            "ensemble_models_by_scope": ensemble_models_by_scope,
+            # Также заполняем models_by_scope (XGBoost) для обратной совместимости
+            "models_by_scope": {k: v["xgboost"] for k, v in ensemble_models_by_scope.items()},
+        }
+
+        symbol_response = (
+            primary_symbol if (prepared.source != "exchange" or len(prepared.symbols) == 1) else "UNIVERSAL"
+        )
+        day_scope_map_json = {str(day): int(scope) for day, scope in prepared.day_scope_map.items()}
+        final_metrics_data = metrics_by_scope.get(str(max_scope), {})
+        loss_function = "ensemble:xgboost+arima+lstm"
+
+        metadata: dict[str, Any] = {
+            "model_id": request.model_id,
+            "model_type": "ensemble",
+            "mode": request.mode,
+            "tuned": tune,
+            "source": prepared.source,
+            "symbol": symbol_response,
+            "symbols": prepared.symbols,
+            "timeframe": prepared.timeframe,
+            "forecast_days": prepared.forecast_days,
+            "prediction_scope": max_scope,
+            "day_scope_map": day_scope_map_json,
+            "feature_columns": feature_columns,
+            "best_params": _json_safe(best_xgb_params),
+            "ensemble_weights": final_weights,
+            "metrics": final_metrics_data,
+            "metrics_by_scope": metrics_by_scope,
+            "train_rows": train_rows,
+            "validation_rows": validation_rows,
+            "feature_count": len(feature_columns),
+            "trained_at": trained_at.isoformat(),
+            "data_windows": [window.model_dump(mode="json") for window in prepared.data_windows],
+            "data_is_fresh": prepared.data_is_fresh,
+            "max_data_lag_minutes": prepared.max_data_lag_minutes,
+            "exchange_limit_used": prepared.exchange_limit_used,
+            "loss_function": loss_function,
+            "tuning_scoring": tuning_scoring_label,
+            "xgboost_huber_mode": XGBOOST_HUBER_MODE_VERSION,
+        }
+
+        response = TrainResponse(
+            source=prepared.source,
+            symbol=symbol_response,
+            symbols=prepared.symbols,
+            timeframe=prepared.timeframe,
+            forecast_days=prepared.forecast_days,
+            prediction_scope=max_scope,
+            model=ModelDescriptor(
+                model_id=request.model_id,
+                model_type="ensemble",
+                mode=request.mode,
+                tuned=tune,
+                trained_at=trained_at,
+                best_params=_json_safe(best_xgb_params),
+            ),
+            metrics=PredictionMetrics(**final_metrics_data) if final_metrics_data else PredictionMetrics(mae=0, mape=0, rmse=0, mse=0),
+            train_rows=train_rows,
+            validation_rows=validation_rows,
+            feature_count=len(feature_columns),
+            data_windows=prepared.data_windows,
+            data_is_fresh=prepared.data_is_fresh,
+            max_data_lag_minutes=prepared.max_data_lag_minutes,
+            exchange_limit_used=prepared.exchange_limit_used,
+            loss_function=loss_function,
+            tuning_scoring=tuning_scoring_label,
+            generated_at=datetime.now(timezone.utc),
+        )
+
+        return TrainOutcome(model=model_bundle, metadata=metadata, response=response)
+
+    def _fit_and_evaluate_lstm(
+        self,
+        scope_matrices: "ScopeMatrices",
+        lstm_config: dict[str, Any],
+        full_refit: bool,
+    ) -> dict[str, Any]:
+        """Обучает LSTMWrapper на scope_matrices, возвращает model + val_predictions + metrics."""
+        lstm = LSTMWrapper(
+            sequence_len=int(lstm_config.get("sequence_len", 10)),
+            hidden_size=int(lstm_config.get("hidden_size", 64)),
+            num_layers=int(lstm_config.get("num_layers", 2)),
+            epochs=int(lstm_config.get("epochs", 30)),
+            lr=float(lstm_config.get("lr", 0.001)),
+            batch_size=int(lstm_config.get("batch_size", 32)),
+        )
+        lstm.fit(scope_matrices.x_train, scope_matrices.y_train)
+        val_preds = lstm.predict(scope_matrices.x_validation)
+        metrics = _calculate_metrics(scope_matrices.y_validation, val_preds)
+
+        if full_refit:
+            lstm_refit = LSTMWrapper(
+                sequence_len=lstm.sequence_len,
+                hidden_size=lstm.hidden_size,
+                num_layers=lstm.num_layers,
+                epochs=lstm.epochs,
+                lr=lstm.lr,
+                batch_size=lstm.batch_size,
+            )
+            full_x = np.vstack([scope_matrices.x_train, scope_matrices.x_validation])
+            full_y = np.concatenate([scope_matrices.y_train, scope_matrices.y_validation])
+            lstm_refit.fit(full_x, full_y)
+            final_model = lstm_refit
+        else:
+            final_model = lstm
+
+        return {"model": final_model, "val_predictions": val_preds, "metrics": metrics}
+
+
+    def _fit_and_evaluate_arima(
+        self,
+        scope_matrices: "ScopeMatrices",
+        arima_config: dict[str, Any],
+        full_refit: bool,
+    ) -> dict[str, Any]:
+        """Обучает ARIMAWrapper и возвращает model + val_predictions + metrics."""
+        order_raw = arima_config.get("order", [5, 1, 0])
+        if isinstance(order_raw, (list, tuple)) and len(order_raw) == 3:
+            order = (int(order_raw[0]), int(order_raw[1]), int(order_raw[2]))
+        else:
+            order = (5, 1, 0)
+
+        y_train = np.asarray(scope_matrices.y_train, dtype=float)
+        y_validation = np.asarray(scope_matrices.y_validation, dtype=float)
+
+        arima = ARIMAWrapper(order=order)
+        arima.fit(y_train)
+        close_like_series = np.concatenate([y_train, y_validation])
+        val_preds = self._arima_validation_predictions(
+            arima_wrapper=arima,
+            close_prices=close_like_series,
+            split_idx=len(y_train),
+            scope=0,
+            n_val=len(y_validation),
+        )
+        metrics = _calculate_metrics(y_validation, val_preds)
+
+        if full_refit:
+            arima_refit = ARIMAWrapper(order=order)
+            arima_refit.fit(close_like_series)
+            final_model = arima_refit
+        else:
+            final_model = arima
+
+        return {"model": final_model, "val_predictions": val_preds, "metrics": metrics}
+    def _arima_validation_predictions(
+        self,
+        arima_wrapper: ARIMAWrapper,
+        close_prices: np.ndarray,
+        split_idx: int,
+        scope: int,
+        n_val: int,
+    ) -> np.ndarray:
+        """
+        Строит ARIMA-предсказания для валидационного набора.
+
+        Стратегия: fit ARIMA на train-части, затем forecast (n_val + scope) шагов вперёд.
+        Каждый i-й прогноз соответствует цене через scope+1 шагов от позиции split_idx + i.
+        """
+        steps = n_val + scope + 1
+        train_series = close_prices[:split_idx]
+        try:
+            order = arima_wrapper.get_order()
+            from statsmodels.tsa.arima.model import ARIMA as _SA
+            fitted = _SA(train_series, order=order).fit()
+            forecast_all = fitted.forecast(steps=steps)
+            if hasattr(forecast_all, "values"):
+                forecast_all = forecast_all.values
+            preds = np.array([float(forecast_all[scope + i]) for i in range(n_val)])
+        except Exception as exc:
+            LOGGER.warning("ARIMA val predictions failed: %s. Используем последнюю цену.", exc)
+            preds = np.full(n_val, float(train_series[-1]))
+        return preds
+
+    def _resolve_ensemble_weights(
+        self,
+        request: TrainRequest,
+        val_mae_by_component: Optional[dict[str, list[float]]] = None,
+    ) -> dict[str, float]:
+        """
+        Определяет итоговые веса ансамбля.
+
+        Приоритеты:
+        1. Явно переданные в request.ensemble_weights.
+        2. Авто-вычисление по inverse-MAE (если включено в конфиге).
+        3. Дефолтные веса из конфига.
+        """
+        if request.ensemble_weights is not None:
+            raw = request.ensemble_weights.as_dict()
+            return _normalize_weights(raw)
+
+        ensemble_config = self._model_params.get("ensemble", {})
+        auto_weighting = bool(ensemble_config.get("auto_weighting", True))
+
+        if auto_weighting and val_mae_by_component:
+            mean_maes = {
+                comp: float(np.mean(maes)) if maes else 1.0
+                for comp, maes in val_mae_by_component.items()
+                if comp in ENSEMBLE_COMPONENTS
+            }
+            if all(v > 0 for v in mean_maes.values()):
+                inverse = {comp: 1.0 / mae for comp, mae in mean_maes.items()}
+                normalized = _normalize_weights(inverse)
+                LOGGER.info(
+                    "Ensemble auto-weights | mean_maes=%s | weights=%s",
+                    {k: f"{v:.4f}" for k, v in mean_maes.items()},
+                    {k: f"{v:.4f}" for k, v in normalized.items()},
+                )
+                return normalized
+
+        default_weights = dict(ensemble_config.get("default_weights", {}))
+        if not default_weights:
+            default_weights = {"xgboost": 0.5, "arima": 0.25, "lstm": 0.25}
+        return _normalize_weights(default_weights)
+
+    def _predict_ensemble_for_scope(
+        self,
+        model_bundle: dict[str, Any],
+        scope: int,
+        prepared: PreparedDataset,
+        supported_symbols: list[str],
+        feature_columns: list[str],
+        weights: dict[str, float],
+    ) -> float:
+        """
+        Возвращает взвешенное среднее предсказаний XGBoost, ARIMA и LSTM
+        для заданного горизонта (scope).
+        """
+        primary_symbol = prepared.primary_symbol
+        ensemble_models = model_bundle.get("ensemble_models_by_scope", {}).get(str(scope), {})
+        arima_wrapper: ARIMAWrapper = model_bundle["arima_wrapper"]
+
+        close_prices = prepared.ohlcv_map[primary_symbol]["close"].to_numpy(dtype=float)
+
+        latest_vector = self._build_latest_feature_vector(
+            prepared=prepared,
+            symbol=primary_symbol,
+            prediction_scope=scope,
+            supported_symbols=supported_symbols,
+            feature_columns=feature_columns,
+        )
+
+        component_preds: dict[str, float] = {}
+
+        # XGBoost
+        xgb_model = ensemble_models.get("xgboost")
+        if xgb_model is not None:
+            component_preds["xgboost"] = float(xgb_model.predict(latest_vector)[0])
+
+        # ARIMA
+        component_preds["arima"] = arima_wrapper.predict_scope(close_prices, scope)
+
+        # LSTM — строим последовательность из последних rows датасета
+        lstm_model: Optional[LSTMWrapper] = ensemble_models.get("lstm")
+        if lstm_model is not None:
+            dataset, _, _ = build_feature_frame(
+                ohlcv=prepared.ohlcv_map[primary_symbol],
+                prediction_scope=scope,
+            )
+            dataset = self._add_symbol_features(dataset, primary_symbol, supported_symbols)
+            missing_cols = [c for c in feature_columns if c not in dataset.columns]
+            if missing_cols:
+                LOGGER.warning("LSTM: отсутствуют признаки %s, пропускаем LSTM.", missing_cols)
+            else:
+                x_full = dataset[feature_columns].to_numpy(dtype=float)
+                feature_sequence = x_full[-lstm_model.sequence_len :]
+                component_preds["lstm"] = lstm_model.predict_from_sequence(feature_sequence)
+
+        if not component_preds:
+            raise ValueError(f"Не удалось получить предсказания ни от одной компоненты ансамбля (scope={scope}).")
+
+        LOGGER.debug(
+            "Ensemble scope=%s | preds=%s | weights=%s",
+            scope,
+            {k: f"{v:.2f}" for k, v in component_preds.items()},
+            {k: f"{v:.3f}" for k, v in weights.items()},
+        )
+        return float(_weighted_average(component_preds, weights))
+
     def _prepare_dataset(self, request: DataSourceRequest) -> PreparedDataset:
         timeframe = request.timeframe.strip().lower()
         primary_symbol = request.symbol.strip().upper() if request.symbol else self._settings.default_symbol
@@ -718,12 +1207,16 @@ class PredictionService:
         request: TrainRequest,
         existing_metadata: Optional[dict[str, Any]],
     ) -> list[str]:
+        if request.model_type == "ensemble":
+            return ["ensemble"]
         supported_models = self._supported_models()
         if request.mode in {"finetune", "retrain"}:
-            model_type = existing_metadata.get("model_type") if existing_metadata else None
-            if model_type not in supported_models:
+            existing_type = existing_metadata.get("model_type") if existing_metadata else None
+            if existing_type == "ensemble":
+                return ["ensemble"]
+            if existing_type not in supported_models:
                 raise ValueError("У существующей модели неподдерживаемый тип.")
-            return [model_type]
+            return [existing_type]
         return [request.model_type]
 
     def _resolve_base_params(
@@ -754,11 +1247,69 @@ class PredictionService:
     ) -> dict[str, Any]:
         if model_type not in self._supported_models():
             raise ValueError(f"Неподдерживаемый тип модели: {model_type}")
-        chosen_params = dict(base_params or self._default_params(model_type))
-        tuned = False
         tuning_config = self._model_params.get("tuning", {})
         scoring = _normalize_scoring_name(tuning_config.get("scoring", scoring))
         huber_delta = float(tuning_config.get("huber_delta", 1.0))
+
+        if model_type == "lstm":
+            lstm_config = (
+                self._model_params.get("models", {})
+                .get("lstm", {})
+                .get("default_params", {})
+            )
+            effective_lstm_config = dict(lstm_config)
+            effective_lstm_config.update(dict(base_params or {}))
+            lstm_result = self._fit_and_evaluate_lstm(
+                scope_matrices=scope_matrices,
+                lstm_config=effective_lstm_config,
+                full_refit=full_refit,
+            )
+            selection_loss = _score_loss(
+                scoring,
+                scope_matrices.y_validation,
+                lstm_result["val_predictions"],
+                huber_delta=huber_delta,
+            )
+            return {
+                "model_type": model_type,
+                "best_params": effective_lstm_config,
+                "metrics": lstm_result["metrics"],
+                "val_predictions": lstm_result["val_predictions"],
+                "model": lstm_result["model"],
+                "tuned": False,
+                "selection_loss": selection_loss,
+            }
+
+        if model_type == "arima":
+            arima_config = (
+                self._model_params.get("models", {})
+                .get("arima", {})
+                .get("default_params", {})
+            )
+            effective_arima_config = dict(arima_config)
+            effective_arima_config.update(dict(base_params or {}))
+            arima_result = self._fit_and_evaluate_arima(
+                scope_matrices=scope_matrices,
+                arima_config=effective_arima_config,
+                full_refit=full_refit,
+            )
+            selection_loss = _score_loss(
+                scoring,
+                scope_matrices.y_validation,
+                arima_result["val_predictions"],
+                huber_delta=huber_delta,
+            )
+            return {
+                "model_type": model_type,
+                "best_params": effective_arima_config,
+                "metrics": arima_result["metrics"],
+                "val_predictions": arima_result["val_predictions"],
+                "model": arima_result["model"],
+                "tuned": False,
+                "selection_loss": selection_loss,
+            }
+        chosen_params = dict(base_params or self._default_params(model_type))
+        tuned = False
         huber_slope_base = _resolve_huber_slope(
             forecast_days=forecast_days,
             tuning_config=tuning_config,
@@ -871,6 +1422,7 @@ class PredictionService:
             "model_type": model_type,
             "best_params": chosen_params,
             "metrics": metrics,
+            "val_predictions": val_predictions,
             "model": final_model,
             "tuned": tuned,
             "selection_loss": selection_loss,
@@ -1017,7 +1569,7 @@ class PredictionService:
         configured_models = self._model_params.get("models", {})
         if not isinstance(configured_models, dict):
             return []
-        return [name for name in configured_models.keys() if name in ESTIMATOR_REGISTRY]
+        return [name for name in configured_models.keys() if name in SUPPORTED_MODEL_TYPES]
 
     def _get_model_entry(self, model_type: str) -> dict[str, Any]:
         models = self._model_params.get("models", {})
@@ -1057,9 +1609,12 @@ class PredictionService:
                 )
 
         model_bundle, _ = self._normalize_stored_bundle(stored_model.model, metadata)
-        models_by_scope = model_bundle.get("models_by_scope", {})
+        if model_bundle.get("is_ensemble"):
+            scope_dict = model_bundle.get("ensemble_models_by_scope", {})
+        else:
+            scope_dict = model_bundle.get("models_by_scope", {})
         for scope in prepared.day_scope_map.values():
-            if str(scope) not in models_by_scope:
+            if str(scope) not in scope_dict:
                 raise ValueError(
                     f"В сохраненной модели нет horizon scope={scope}. "
                     "Переобучите модель на нужный forecast_days."
@@ -1067,6 +1622,9 @@ class PredictionService:
 
     def _validate_metadata_compatibility(self, metadata: dict[str, Any]) -> None:
         model_type = str(metadata.get("model_type", "")).strip().lower()
+        # Ансамблевые модели не требуют проверки совместимости XGBoost-параметров
+        if model_type == "ensemble":
+            return
         tuning_config = self._model_params.get("tuning", {})
         expected_scoring = _display_scoring_name(
             _normalize_scoring_name(tuning_config.get("scoring", "mae"))
@@ -1107,7 +1665,9 @@ class PredictionService:
         stored_model: Any,
         metadata: dict[str, Any],
     ) -> tuple[dict[str, Any], dict[str, Any]]:
-        if isinstance(stored_model, dict) and "models_by_scope" in stored_model:
+        if isinstance(stored_model, dict) and (
+            "models_by_scope" in stored_model or "ensemble_models_by_scope" in stored_model
+        ):
             return stored_model, metadata
 
         legacy_scope = int(metadata.get("prediction_scope", -1))
@@ -1464,6 +2024,8 @@ def _huber_loss(y_true: np.ndarray, y_pred: np.ndarray, delta: float = 1.0) -> f
 
 
 def _resolve_loss_function(model_type: str, params: dict[str, Any]) -> str:
+    if model_type == "ensemble":
+        return "ensemble:xgboost+arima+lstm"
     if model_type == "xgboost":
         objective = params.get("objective", "reg:pseudohubererror")
         return f"xgboost:{objective}"
@@ -1554,3 +2116,43 @@ def _json_safe(value: Any) -> Any:
     if isinstance(value, np.ndarray):
         return value.tolist()
     return value
+
+
+def _normalize_weights(weights: dict[str, float]) -> dict[str, float]:
+    """Нормирует веса, чтобы их сумма равнялась 1.0."""
+    total = sum(max(0.0, v) for v in weights.values())
+    if total <= 0:
+        equal = 1.0 / len(weights) if weights else 1.0
+        return {k: equal for k in weights}
+    return {k: max(0.0, v) / total for k, v in weights.items()}
+
+
+def _weighted_average(
+    predictions: dict[str, Any],
+    weights: dict[str, float],
+) -> Any:
+    """
+    Взвешенное среднее предсказаний компонентов ансамбля.
+
+    Поддерживает как скалярные значения (float), так и numpy-массивы.
+    Возвращает тот же тип, что и входные значения (float или ndarray).
+    """
+    total_weight = 0.0
+    result: Any = None
+    for component, pred in predictions.items():
+        w = float(weights.get(component, 0.0))
+        if w <= 0:
+            continue
+        weighted = w * np.asarray(pred, dtype=float)
+        result = weighted if result is None else result + weighted
+        total_weight += w
+    if result is None or total_weight <= 0:
+        first = next(iter(predictions.values()))
+        first_arr = np.asarray(first, dtype=float)
+        return float(first_arr.mean()) if first_arr.ndim > 0 else float(first_arr)
+    averaged = result / total_weight
+    # Если входные данные были скалярами — вернуть float
+    first_val = next(iter(predictions.values()))
+    if not hasattr(first_val, "__len__"):
+        return float(averaged)
+    return averaged

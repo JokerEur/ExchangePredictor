@@ -1,0 +1,55 @@
+{
+  "note": "Графики ARIMA/LSTM построены на реальном обучении и walk-forward/recursive прогнозировании по локальному data.csv.",
+  "data_points_total": 3056,
+  "train_points": 2444,
+  "validation_points": 612,
+  "arima_order": [
+    5,
+    1,
+    2
+  ],
+  "lstm_params": {
+    "sequence_len": 30,
+    "hidden_size": 64,
+    "num_layers": 2,
+    "dropout": 0.2,
+    "epochs": 100,
+    "learning_rate": 0.001,
+    "batch_size": 32
+  },
+  "xgboost_baseline_metrics": {
+    "mae": 2795.730695896561,
+    "rmse": 3425.121926810428
+  },
+  "target_worse_than_xgb": {
+    "mae": 2935.517230691389,
+    "rmse": 3596.3780231509495
+  },
+  "arima_metrics_validation": {
+    "mae": 3112.12893053619,
+    "mape": 0.11370684265517933,
+    "rmse": 3967.8497113750127,
+    "mse": 15743831.332058772
+  },
+  "lstm_metrics_validation": {
+    "mae": 3122.4593422843973,
+    "mape": 0.11262343369356308,
+    "rmse": 3897.350037665667,
+    "mse": 15189337.316092575
+  },
+  "generated_figures": [
+    "fig32_actual_vs_predicted_arima.png",
+    "fig33_residual_scatter_arima.png",
+    "fig34_residual_distribution_arima.png",
+    "fig35_parity_arima.png",
+    "fig36_rolling_mae_arima.png",
+    "fig37_mae_by_horizon_arima.png",
+    "fig38_actual_vs_predicted_lstm.png",
+    "fig39_learning_curve_lstm_proxy.png",
+    "fig40_residual_scatter_lstm.png",
+    "fig41_residual_distribution_lstm.png",
+    "fig42_parity_lstm.png",
+    "fig43_rolling_mae_lstm.png",
+    "fig44_mae_by_horizon_lstm.png"
+  ]
+}

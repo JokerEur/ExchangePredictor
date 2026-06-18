@@ -57,10 +57,57 @@ body {
   letter-spacing: -0.03em;
 }
 
+.topbar-subtitle {
+  margin: 8px 0 0;
+  color: var(--text-muted);
+  font-size: 13px;
+  max-width: 520px;
+}
+
 .controls {
   display: flex;
   flex-wrap: wrap;
   gap: 10px;
+}
+
+.role-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  padding: 6px 8px;
+}
+
+.role-switch-label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+  font-weight: 700;
+}
+
+.role-switch-options {
+  display: inline-flex;
+  gap: 6px;
+}
+
+.role-switch-btn {
+  border: 1px solid rgba(189, 174, 147, 0.95);
+  background: rgba(249, 245, 215, 0.85);
+  color: var(--text-muted);
+  border-radius: 8px;
+  padding: 6px 10px;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.role-switch-btn.is-active {
+  background: var(--primary);
+  border-color: var(--primary-soft);
+  color: #fbf1c7;
 }
 
 .control-select,
@@ -167,8 +214,12 @@ body {
 
 .layout-grid {
   display: grid;
-  grid-template-columns: minmax(0, 2fr) minmax(300px, 1fr);
+  grid-template-columns: minmax(0, 2.55fr) minmax(260px, 0.85fr);
   gap: 18px;
+}
+
+.layout-grid-broker {
+  grid-template-columns: minmax(0, 2.9fr) minmax(240px, 0.72fr);
 }
 
 .main-column,
@@ -234,6 +285,169 @@ body {
   color: var(--text-muted);
 }
 
+.decision-panel {
+  border-color: rgba(69, 133, 136, 0.26);
+  background: linear-gradient(140deg, rgba(69, 133, 136, 0.14), rgba(249, 245, 215, 0.92));
+}
+
+.decision-panel-up {
+  border-color: rgba(152, 151, 26, 0.45);
+}
+
+.decision-panel-down {
+  border-color: rgba(204, 36, 29, 0.35);
+}
+
+.decision-panel-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.decision-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  border: 1px solid rgba(124, 111, 100, 0.4);
+  background: rgba(249, 245, 215, 0.9);
+  min-width: 82px;
+  padding: 6px 10px;
+  font-size: 11px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  font-weight: 800;
+}
+
+.decision-badge-up {
+  color: #427b58;
+  border-color: rgba(66, 123, 88, 0.5);
+}
+
+.decision-badge-down {
+  color: #9d0006;
+  border-color: rgba(157, 0, 6, 0.45);
+}
+
+.decision-badge-neutral {
+  color: #7c6f64;
+}
+
+.decision-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(210px, 0.9fr);
+  gap: 12px;
+}
+
+.decision-value {
+  margin: 0 0 6px;
+  font-size: 30px;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+}
+
+.decision-rationale {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.decision-meta {
+  border-radius: 12px;
+  border: 1px solid rgba(189, 174, 147, 0.8);
+  background: rgba(249, 245, 215, 0.78);
+  padding: 10px;
+}
+
+.decision-meta p {
+  margin: 0 0 8px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.decision-meta p:last-child {
+  margin-bottom: 0;
+}
+
+.broker-playbook-panel {
+  border-color: rgba(189, 174, 147, 0.85);
+  background: linear-gradient(160deg, rgba(251, 241, 199, 0.95), rgba(235, 219, 178, 0.78));
+}
+
+.broker-playbook-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.broker-playbook-head h3 {
+  margin: 0;
+  font-size: 13px;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.broker-volatility-tag {
+  border-radius: 999px;
+  border: 1px solid rgba(124, 111, 100, 0.42);
+  padding: 4px 9px;
+  font-size: 11px;
+  font-weight: 700;
+  color: #665c54;
+  background: rgba(249, 245, 215, 0.78);
+}
+
+.broker-volatility-tag-up {
+  color: #427b58;
+  border-color: rgba(66, 123, 88, 0.5);
+}
+
+.broker-volatility-tag-down {
+  color: #9d0006;
+  border-color: rgba(157, 0, 6, 0.45);
+}
+
+.broker-playbook-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.broker-playbook-card {
+  border: 1px solid rgba(189, 174, 147, 0.8);
+  border-radius: 12px;
+  background: rgba(249, 245, 215, 0.76);
+  padding: 10px;
+}
+
+.broker-card-title {
+  margin: 0 0 8px;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.09em;
+  color: var(--text-muted);
+  font-weight: 700;
+}
+
+.broker-card-rows p {
+  margin: 0 0 8px;
+  font-size: 13px;
+  color: var(--text-muted);
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.broker-card-rows p:last-child {
+  margin-bottom: 0;
+}
+
 .chart-panel h3,
 .horizon-panel h3,
 .forecast-panel h3,
@@ -267,60 +481,122 @@ body {
   color: var(--text-muted);
 }
 
-.chart-svg {
-  display: block;
+.chart-canvas-shell {
   width: 100%;
-  height: 320px;
+  min-width: 0;
   border-radius: 14px;
-  background: linear-gradient(180deg, rgba(235, 219, 178, 0.95), rgba(242, 229, 188, 0.65));
-  cursor: grab;
+  overflow: hidden;
+  border: 1px solid rgba(189, 174, 147, 0.8);
+  background: linear-gradient(180deg, rgba(247, 240, 210, 0.95), rgba(239, 229, 186, 0.72));
+  box-shadow: inset 0 0 0 1px rgba(249, 245, 215, 0.35);
+  padding: 8px 10px 10px;
 }
 
-.chart-viewport.is-dragging .chart-svg {
-  cursor: grabbing;
-}
-
-.chart-viewport-toolbar {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 10px;
-  margin-bottom: 8px;
-}
-
-.chart-viewport-meta {
+.chart-tooltip-strip {
   display: flex;
   flex-wrap: wrap;
-  gap: 10px;
+  gap: 10px 14px;
+  margin: 0 2px 8px;
+  font-size: 11px;
   color: var(--text-muted);
+  font-weight: 600;
+}
+
+.chart-tooltip-item b {
+  color: var(--text-main);
+  font-weight: 700;
+}
+
+.chart-svg {
+  width: 100%;
+  height: auto;
+  display: block;
+  user-select: none;
+  touch-action: none;
+}
+
+.chart-surface-price,
+.chart-surface-volume {
+  fill: rgba(251, 241, 199, 0.56);
+  stroke: rgba(124, 111, 100, 0.34);
+  stroke-width: 1;
+}
+
+.chart-grid-line {
+  stroke: rgba(124, 111, 100, 0.18);
+  stroke-width: 1;
+}
+
+.chart-grid-line-strong {
+  stroke: rgba(124, 111, 100, 0.32);
+}
+
+.chart-grid-line-vertical {
+  stroke-dasharray: 2 6;
+}
+
+.chart-axis-line {
+  stroke: rgba(124, 111, 100, 0.55);
+  stroke-width: 1;
+}
+
+.chart-axis-label {
+  fill: #7c6f64;
   font-size: 11px;
   font-weight: 600;
 }
 
-.chart-viewport-actions {
-  display: inline-flex;
-  gap: 6px;
+.chart-overlay-tag-bg {
+  fill: rgba(251, 241, 199, 0.86);
+  stroke: rgba(124, 111, 100, 0.45);
 }
 
-.chart-viewport-btn {
-  border: 1px solid rgba(189, 174, 147, 0.9);
-  background: rgba(249, 245, 215, 0.86);
-  color: var(--text-main);
-  border-radius: 8px;
-  font-size: 12px;
+.chart-overlay-tag-text {
+  fill: #3c3836;
+  font-size: 10px;
   font-weight: 700;
-  padding: 4px 9px;
-  cursor: pointer;
 }
 
-.chart-viewport-btn:disabled {
-  opacity: 0.45;
-  cursor: not-allowed;
+.chart-forecast-spread {
+  fill: rgba(69, 133, 136, 0.14);
+  stroke: rgba(69, 133, 136, 0.38);
+  stroke-width: 1;
+  pointer-events: none;
 }
 
-.chart-viewport-btn-reset {
+.chart-forecast-spread-selected {
+  fill: rgba(7, 102, 120, 0.2);
+  stroke: rgba(7, 102, 120, 0.56);
+}
+
+.chart-hover-line {
+  stroke: rgba(63, 63, 63, 0.58);
+  stroke-width: 1;
+  stroke-dasharray: 4 4;
+  pointer-events: none;
+}
+
+.chart-hover-line-horizontal {
+  stroke: rgba(63, 63, 63, 0.4);
+}
+
+.chart-hover-marker {
+  fill: #3c3836;
+  stroke: #fbf1c7;
+  stroke-width: 1;
+  pointer-events: none;
+}
+
+.chart-interaction-layer {
+  fill: transparent;
+  cursor: crosshair;
+}
+
+.chart-interaction-note {
+  margin: 7px 2px 0;
+  font-size: 11px;
+  color: var(--text-muted);
   font-weight: 600;
-  letter-spacing: 0.02em;
 }
 
 .chart-empty {
@@ -357,6 +633,13 @@ body {
 
 .forecast-dot {
   background: #458588;
+}
+.spread-dot {
+  background: #6b8f96;
+}
+
+.levels-dot {
+  background: #d65d0e;
 }
 
 .horizon-bars {
@@ -822,6 +1105,10 @@ body {
   color: #f9f5d7;
 }
 
+.confidence-panel-broker {
+  background: linear-gradient(160deg, #689d6a, #458588);
+}
+
 .confidence-value {
   margin-top: 6px;
   display: inline-flex;
@@ -857,6 +1144,10 @@ body {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 10px;
+}
+
+.confidence-kpi-grid-broker {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
 .confidence-kpi {
@@ -961,6 +1252,24 @@ body {
   display: none;
 }
 
+.mobile-decision-btn {
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-weight: 800;
+}
+
+.mobile-decision-up {
+  color: #427b58;
+}
+
+.mobile-decision-down {
+  color: #9d0006;
+}
+
+.mobile-decision-neutral {
+  color: #7c6f64;
+}
+
 @media (max-width: 1100px) {
   .layout-grid {
     grid-template-columns: 1fr;
@@ -994,9 +1303,29 @@ body {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  .chart-viewport-toolbar {
+  .chart-tooltip-strip {
+    gap: 8px;
+  }
+  .decision-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .role-switch {
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  .role-switch-options {
+    flex: 1;
+    justify-content: flex-end;
+  }
+  .broker-playbook-head {
     flex-direction: column;
     align-items: flex-start;
+  }
+
+  .broker-playbook-grid {
+    grid-template-columns: 1fr;
   }
 
   .topbar {

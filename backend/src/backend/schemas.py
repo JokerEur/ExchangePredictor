@@ -5,7 +5,7 @@ from pydantic import BaseModel, Field
 
 AllowedSource = Literal["local", "exchange"]
 TrainMode = Literal["train", "finetune", "retrain"]
-RequestedModelType = Literal["random_forest", "xgboost"]
+RequestedModelType = Literal["xgboost", "arima", "lstm", "ensemble"]
 
 
 class DataSourceRequest(BaseModel):
@@ -77,14 +77,32 @@ class ModelDescriptor(BaseModel):
     best_params: dict[str, Any]
 
 
+class EnsembleWeights(BaseModel):
+    """Весовые коэффициенты компонентных моделей ансамбля."""
+
+    xgboost: float = Field(default=0.5, ge=0.0, le=1.0)
+    arima: float = Field(default=0.25, ge=0.0, le=1.0)
+    lstm: float = Field(default=0.25, ge=0.0, le=1.0)
+
+    def as_dict(self) -> dict[str, float]:
+        return {"xgboost": self.xgboost, "arima": self.arima, "lstm": self.lstm}
+
+
 class TrainRequest(DataSourceRequest):
     mode: TrainMode = Field(default="train")
     model_id: str = Field(default="default", min_length=1, max_length=100)
-    model_type: RequestedModelType = Field(default="xgboost")
+    model_type: RequestedModelType = Field(default="ensemble")
     tune: bool = Field(default=True)
     tune_trials: int = Field(default=24, ge=4, le=300)
     persist_model: bool = Field(default=True)
     full_refit: bool = Field(default=True)
+    ensemble_weights: Optional[EnsembleWeights] = Field(
+        default=None,
+        description=(
+            "Веса компонентов ансамбля (xgboost, arima, lstm). "
+            "Если не указаны, вычисляются автоматически по метрикам валидации."
+        ),
+    )
 
 
 class TrainResponse(BaseModel):
@@ -113,9 +131,16 @@ class PredictRequest(DataSourceRequest):
     use_saved_model: bool = Field(default=True)
     auto_train_if_missing: bool = Field(default=True)
     auto_train_mode: TrainMode = Field(default="train")
-    auto_model_type: RequestedModelType = Field(default="xgboost")
+    auto_model_type: RequestedModelType = Field(default="ensemble")
     tune_on_auto_train: bool = Field(default=True)
     tune_trials: int = Field(default=16, ge=4, le=300)
+    ensemble_weights: Optional[EnsembleWeights] = Field(
+        default=None,
+        description=(
+            "Переопределить веса ансамбля при предсказании. "
+            "Если не указаны — используются веса из сохранённой модели."
+        ),
+    )
 
 
 class DailyForecastPoint(BaseModel):
@@ -148,6 +173,7 @@ class PredictionResponse(BaseModel):
     training_exchange_limit: Optional[int] = None
     loss_function: Optional[str] = None
     tuning_scoring: Optional[str] = None
+    ensemble_weights: Optional[dict[str, float]] = None
     request_data_windows: list[DataWindow] = Field(default_factory=list)
     request_data_is_fresh: bool
     request_max_data_lag_minutes: float

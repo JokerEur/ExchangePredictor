@@ -21,24 +21,6 @@ DEFAULT_MODEL_CONFIG: dict[str, Any] = {
         },
     },
     "models": {
-        "random_forest": {
-            "default_params": {
-                "n_estimators": 500,
-                "max_depth": 12,
-                "min_samples_split": 4,
-                "min_samples_leaf": 2,
-                "max_features": "sqrt",
-                "random_state": 42,
-                "n_jobs": -1,
-            },
-            "search_space": {
-                "n_estimators": [200, 300, 500, 700, 900],
-                "max_depth": [6, 8, 10, 12, 16, None],
-                "min_samples_split": [2, 3, 4, 6, 10],
-                "min_samples_leaf": [1, 2, 3, 4],
-                "max_features": ["sqrt", "log2", 0.7, 1.0],
-            },
-        },
         "xgboost": {
             "default_params": {
                 "n_estimators": 600,

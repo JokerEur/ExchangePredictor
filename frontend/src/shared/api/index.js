@@ -42,7 +42,6 @@ export async function getPrediction({
   modelId,
   symbols,
 }) {
-  const effectiveModelType = modelType === "random_forest" ? "random_forest" : "xgboost";
   const symbolKey = String(symbol || "BTC/USD")
     .trim()
     .toLowerCase()
@@ -53,13 +52,19 @@ export async function getPrediction({
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "");
-  const effectiveModelId = modelId || `single-${symbolKey}-${timeframeKey}-${effectiveModelType}`;
+
+  const effectiveModelId =
+    modelId ||
+    (modelType === "ensemble"
+      ? `ensemble-${symbolKey}-${timeframeKey}`
+      : `single-${symbolKey}-${timeframeKey}-${modelType}`);
+
   const body = {
     model_id: effectiveModelId,
     use_saved_model: true,
     auto_train_if_missing: true,
     auto_train_mode: "train",
-    auto_model_type: effectiveModelType,
+    auto_model_type: modelType,
     tune_on_auto_train: true,
     tune_trials: 20,
     source: "exchange",
